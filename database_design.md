@@ -7,30 +7,35 @@ simulators in general.
 
 ### The State of the Art
 
-[Explain how NEURON uses object-oriented-programming.]
-
 Currently NEURON and all other state of the art neural simulators are written in
 an object oriented programming style. Data is held in arrays of structures or
 classes which are connected together by pointers. They use the programming
-languages built-in data structures and algorithms without making any attempt to
-extend or improve upon them.
-
-[Explain how this is inflexible and can lead to significant code bloat,
-especially when doing things which are not natively supported by the language.]
+languages built-in data structures and algorithms. Their data structures are
+specified by their source code, which works well for an immediate
+implementation, but also forces them to use the syntax and semantics of the
+programming language which they write in.
 
 ### The case for using a Database
 
-The primary benefit of using a database is that it gives you a way to think
-about data in the abstract. By collecting all of your data into a single place
-you can see all of the commonalities. You can write software tools which do
-more things with fewer lines of code and with almost no redundant code
-duplication. New features can be enabled and applied to every datum from a
-central location.
+ * One benefit of using a database is that it gives you a way to think about
+   data in the abstract. By collecting all of your data into a single place you
+   can see all of the commonalities between the different pieces of data in
+   your simulation.
+
+ * By using a database, you can write software tools which do more things with
+   fewer lines of code and with almost no redundant code duplication (at least
+   related to memory). New features can be enabled and applied to every datum
+   from a central location.
+
+ * You can make your own database with its own syntax and semantics to suit
+   your needs. This is obtainable, I estimate that this database if written in
+   python should be between 1k-5k lines of code.
 
 ## User Profiles
 
 The database will be used by two groups of people: first by programmers and then
-by the users of their programs.
+by the end users of their programs. The database will have two API's, one for
+each user group.
 
 ### Profile of a Computer Programmer
 
@@ -39,9 +44,9 @@ by the users of their programs.
     - Learns the details of a given computer system.
     - Debugs unexpected issues, can read a stack backtrace.
     - Trusted with your programs private variables.
-* Wants computer speed and memory performance above all else.
+* Wants computer speed and memory performance.
 
-### Profile of a Scientist
+### Profile of the End User
 
 * Minimal technical experience:
     - Wants easy to use.
@@ -49,6 +54,19 @@ by the users of their programs.
     - Unwilling to learn new 'programming paradigms'. Expects computer systems
       to conform to their existing mental models of how things should work.
 * Wants high quality results that can be directly published.
+
+### Two API's
+
+The programmers API allows access to the raw data.
+
+The end users API presents an easy to use interface:
+ * Python. It should use all of pythons built-in features:
+    + Classes
+    + Docstrings
+    + Properties for setter/getter methods
+
+The database and its APIs must live entirely inside of a single thread of python
+execution.
 
 ### Terminology
 
@@ -80,13 +98,13 @@ Now let's describe this program using the database terminology:
 ## Requirements
 
 ### Creating Schema
- * Create Archetypes and Components. Although typically these will only be
-   created at the start of the program, it would be convenient for the end user
-   if they could add things to the database while the program is running.
+ * [Who can?] Create Archetypes and Components. Although typically these will
+   only be created at the start of the program, it would be convenient for the
+   end user to add things to the database while the program is running.
 
 ### Components
 
-There are many different types of components for reqpresenting different and
+There are many different types of components for representing different and
 specialized data structures and algorithms.
 
 #### Attributes
@@ -97,7 +115,7 @@ specialized data structures and algorithms.
  * Attributes must keep their data in a single contiguous array. This is
    essential for fast processing of the data.
 
-#### Global constants
+#### Global Constants
 
  * This is a special case of an attribute, it's like an attribute except that
    all Entities see the same constant value.
@@ -125,34 +143,55 @@ Each component can be configured to check for common issues.
  * The database will provide an API for running all of the checks as well as
    checking specific components.
 
-### Entity Handles
- * User may Create and Destroy Entities at any time.
- * An **EntityHandle** is a special code object that the database gives to the
-   user to represent an entity.
-    + When the user creates an Entity they get an EntityHandle in return.
-    + Can use it to destroy the entity.
-    + Can use it to access data associated with the Entity.
-    + EntityHandles are persistent. They are valid until the user frees them.
-
 ### Pointers
  * A pointer is the memory address of an Entity.
- * Programmers can use pointers, end users may **not** use pointers. End users
-   should use the EntityHandle instead.
+ * Pointers are for the programmers API. Programmers can use pointers, end users
+   may **not** use pointers. End users must use the EntityHandle instead.
  * Entities are stored in contiguous zero-indexed arrays, where each array
    contains all entities of their archetype.
- * Pointers are represented as indexes into entity arrays. This is important
+ * Pointers are represented as indexes into the entity arrays. This is important
    for using a structure-of-arrays memory layout. It also allows pointers to be
-   represented as 32 bit numbers instead of 64 bit numbers.
+   represented in 32 bits instead of 64 bits.
  * Holes are not allowed in the entity arrays. Therefore when the user deletes
    an entity from the middle of the list of entities, then a different entity
    is moved to fill in the hole and all pointers to the moved entity are
    updated to point to the new address.
- * Moving the memory locations of entity is possible because the database knows
-   the memory location of every pointer. This operation can be done efficiently
-   if all entities are destroyed in a batch, as opposed to one at a time.
+   + Moving the memory locations of entities is possible because the database
+     knows the memory location of every pointer.
+   + This operation can be done efficiently if all entities are destroyed in
+     batches, as opposed to one at a time. The algorithm to move entities reads
+     and writes every pointer in the database exactly once, and can move any
+     number of entities simultaneously.
+      - Programmers need to batch up their operations.
+      - Linear run time.
+   + The alternative implementation is a dead/alive mask over the entity arrays.
+      - The programmers to need to understand how to use the alive mask.
+      - Linear memory usage.
  * Programmers may use pointers that are stored in the database, with the
    limitation that you may not save the pointers. The database will provide a
    way to make persistent EntityHandles out of the transient pointers.
+
+### Entities
+ * User may Create and Destroy Entities at any time.
+ * EntityHandles are designed for the end users API.
+    + An **EntityHandle** is a special code object that the database gives to
+      the user to represent a specific entity.
+    + When the user creates an entity they get an EntityHandle in return.
+    + Can use it to destroy the entity.
+    + Can use it to access data associated with the entity.
+    + EntityHandles are persistent. They are valid until the user destroys
+      either the underlying entity or the handle.
+ * Pointers to destroyed entities are invalid and must be either overwritten or
+   destroyed. Components containing pointer values can be configured to either
+   allow or disallow NULL pointers.
+   + If NULL pointers are allowed then pointers to destroyed entities are
+     replaced with NULL pointers.
+   + If NULL pointers are disallowed then the entities that contain them are
+     automatically destroyed. This can trigger a chain reaction of
+     destruction.
+      - For example, this is useful for attaching ion-channels to a segment of a
+        neurons membrane because then when you destroy the segment it
+        automatically destroys all attached ion-channels.
 
 ### Documentation
 
@@ -161,10 +200,9 @@ descriptions of the data in the database too.
  * The programmer can attach user-facing documentation to any Archetype or
    Component. The documentation can be as simple text string.
  * The database will render user-facing documentation of itself, showing its
-   internal database schame, and including all attached documentation.
- * Physical units are a special type of documentation, and the database allow
-   you to read the units associated with a component.
-    + Other ideas 
+   database schema, and including all attached documentation.
+ * Physical units are a special type of documentation, and the database treats
+   them with a special case.
 
 ### Introspection
 
@@ -174,35 +212,19 @@ associated meta-data, at run time.
    (UI's). UI programs need to know how the underlying database is organized in
    order to effectively present it to the user. By reading the database schema
    at run time the UI can be much more flexible and easier to write & maintain.
-   In fact one of the common "software design patterns" for making graphical
-   user interfaces starts with splitting your software into three parts: the
-   model, the view, and the controller. The model is a database, like what we
-   are building here, although typically the database which UI's use is custom
-   tailored for the specific needs of graphical user interfaces.
-   + For more see: https://en.wikipedia.org/wiki/Model%E2%80%93view%E2%80%93controller
 
-### Hardware and Computing Environment
+### Hardware Memory Spaces
 
- * CPU. There will always be a CPU running python connected to the computing
-   evironment.
- * GPU. Sometimes there will be graphics cards connected to the computing
-   environment. The database should deal with moving data to and from it.
+The database can utilize multiple memory spaces.
+ * CPU: host only.
+ * GPU: connected to host, openCL or CUDA?
  * Other. The database should be implemented in such a way that it is possible
    to add other hardware platforms.
 
 TODO: how is this specified? by default where do things live? what kind of
 controls does the programmer/user have over it?
 
-### Miscellaneous Ideas
-
-#### Function Components
-
-In my prototype, I allow functions as entries in the database.
-Maybe useful for presenting a cohesive API?
-Examples from my prototype model:
-  + clock()
-  + create_segment()
-  + destroy_segment()
+### Other Ideas
 
 #### Grids of Entities
 
@@ -210,28 +232,16 @@ An Archetype could define a regular grid to place Entities on and provide tools
 for efficiently working with grids of Entities. For example this could be used
 to implement extracellular diffusion at a course granularity.
 
-#### Spatial Partitioning Structures
- - For performing fast nearest neighbor searches.
-
 #### Temporary Buffers
 
-It might be nice to have working data be managed by the database, but not
+It might be nice to have your working data be managed by the database, but not
 persistently stored. The programmer would be responsible for free'ing it when
-they're done with it.
+they're done with it, or else it would just sit around like permanent data.
+
+#### Spatial Partitioning Structures
+ - For performing fast nearest neighbor searches.
+ - Requires valid/invalid book keeping.
 
 #### Linear Systems
- - different algorithm than NEURON ...
- - exact but not accurate :(
-
-#### Bookkeeping
- - valid/invalid?
- - run on change?
- - data logging buffers?
-
-## Application Programming Interface
- - The database program and API will run within a single OS process, and may be
-   further restricted to a single thread of execution.
- - The database will provide a python API.
- - The API is callable from a single thread of execution.
-
-[tbd]
+ - Different solver algorithm than NEURON, might be faster but its not as accurate.
+ - Requires valid/invalid book keeping.
