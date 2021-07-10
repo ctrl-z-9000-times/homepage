@@ -3,7 +3,8 @@
 ## Introduction
 
 This document seeks to design a database suitable for NEURON and for neural
-simulators in general.
+simulators in general. A database is a software tool that organizes and manages
+data.
 
 ### The State of the Art
 
@@ -65,8 +66,8 @@ The end users API presents an easy to use interface:
     + Docstrings
     + Properties for setter/getter methods
 
-The database and its APIs must live entirely inside of a single thread of python
-execution.
+The database and its APIs will likely be restricted to live entirely inside of a
+single thread of python execution.
 
 ### Terminology
 
@@ -98,9 +99,9 @@ Now let's describe this program using the database terminology:
 ## Requirements
 
 ### Creating Schema
- * [Who can?] Create Archetypes and Components. Although typically these will
-   only be created at the start of the program, it would be convenient for the
-   end user to add things to the database while the program is running.
+ * Programmers can create Archetypes and Components. Although typically these
+   will only be created at the start of the program, it would be convenient to
+   add things to the database while the program is running.
 
 ### Components
 
@@ -112,8 +113,9 @@ specialized data structures and algorithms.
  * An attribute is a simple piece of data attached to an Entity.
  * The data type can be anything, including arbitrary user defined data types.
    The most common data types will be floating-point and pointer types.
- * Attributes must keep their data in a single contiguous array. This is
-   essential for fast processing of the data.
+ * Attributes must keep all of their data in a single contiguous array each
+   containing exactly one attribute. This is essential for fast processing of
+   data.
 
 #### Global Constants
 
@@ -139,11 +141,23 @@ Each component can be configured to check for common issues.
  * All components that can contain a pointer will have an optional check for
    NULL pointers.
  * By default, all checks should be disabled.
- * Checks should be configured when the Component is first specified/created.
- * The database will provide an API for running all of the checks as well as
-   checking specific components.
+ * Checks should be configured when the component is first specified/created.
+ * The database will provide an API method for running all of the checks as well
+   as checking specific components.
 
-### Pointers
+### Entities
+
+#### Entity Handles
+ * Users may Create and Destroy Entities at any time.
+ * End users must use EntityHandles, which are special code objects that the
+   database uses to represent a specific entity.
+    + When the user creates an entity they get an EntityHandle in return.
+    + EntityHandles can destroy their entity.
+    + EntityHandles can access data associated with their entity.
+    + EntityHandles are persistent. They are valid until the user destroys
+      either the underlying entity or the handle.
+
+#### Pointers
  * A pointer is the memory address of an Entity.
  * Pointers are for the programmers API. Programmers can use pointers, end users
    may **not** use pointers. End users must use the EntityHandle instead.
@@ -171,16 +185,7 @@ Each component can be configured to check for common issues.
    limitation that you may not save the pointers. The database will provide a
    way to make persistent EntityHandles out of the transient pointers.
 
-### Entities
- * User may Create and Destroy Entities at any time.
- * EntityHandles are designed for the end users API.
-    + An **EntityHandle** is a special code object that the database gives to
-      the user to represent a specific entity.
-    + When the user creates an entity they get an EntityHandle in return.
-    + Can use it to destroy the entity.
-    + Can use it to access data associated with the entity.
-    + EntityHandles are persistent. They are valid until the user destroys
-      either the underlying entity or the handle.
+#### Destroying Entities
  * Pointers to destroyed entities are invalid and must be either overwritten or
    destroyed. Components containing pointer values can be configured to either
    allow or disallow NULL pointers.
