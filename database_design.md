@@ -2,9 +2,9 @@
 
 ## Introduction
 
-This document seeks to design a database suitable for NEURON and for neural
-simulators in general. A database is a software tool that organizes and manages
-data.
+This document seeks to design a database suitable for the internal data
+structures of NEURON and of neural simulators in general. A database is a
+software tool for organizing and managing data.
 
 ### The State of the Art
 
@@ -21,16 +21,25 @@ programming language which they write in.
  * One benefit of using a database is that it gives you a way to think about
    data in the abstract. By collecting all of your data into a single place you
    can see all of the commonalities between the different pieces of data in
-   your simulation.
+   your simulation. To that end, this document seeks to gather all requirements
+   and constraints for the data structures inside of your simulations.
 
- * By using a database, you can write software tools which do more things with
-   fewer lines of code and with almost no redundant code duplication (at least
-   related to memory). New features can be enabled and applied to every datum
-   from a central location.
+ * Another benefit of using a database is that you can consolidate duplicate
+   pieces of software into a shared code-base. You can write software tools
+   which do more things with fewer lines of code and with almost no redundant
+   code duplication (at least related to memory management). Fixes and new
+   features can be enabled and applied to every datum from a central location.
 
- * You can make your own database with its own syntax and semantics to suit
-   your needs. This is obtainable, I estimate that this database if written in
-   python should be between 1k-5k lines of code.
+ * Finally, if you make your own database then you can make it to bespoke to
+   suit the needs of your programs.
+
+### Innovations
+
+Most of aspects of this design are not novel. Rather, they came about as
+solutions to common problems that arose in the course of implementing neural
+simulators. What is novel is the combination of all of these pieces to form a
+cohesive set of tools, where all of the pieces work together with synergy but
+still remain flexible.
 
 ## User Profiles
 
@@ -69,7 +78,7 @@ The end users API presents an easy to use interface:
 The database and its APIs will likely be restricted to live entirely inside of a
 single thread of python execution.
 
-### Terminology
+## Terminology
 
 This database is tailored for running physics simulations, and to that end it
 has special words for dealing with the physical things which exist in your
@@ -147,31 +156,30 @@ Each component can be configured to check for common issues.
 
 ### Entities
 
-#### Entity Handles
- * Users may Create and Destroy Entities at any time.
- * End users must use EntityHandles, which are special code objects that the
-   database uses to represent a specific entity.
-    + When the user creates an entity they get an EntityHandle in return.
-    + EntityHandles can destroy their entity.
-    + EntityHandles can access data associated with their entity.
-    + EntityHandles are persistent. They are valid until the user destroys
-      either the underlying entity or the handle.
+ * Any user may create and destroy entities at any time.
+ * Any user may access the component data at any time.
 
-#### Pointers
- * A pointer is the memory address of an Entity.
- * Pointers are for the programmers API. Programmers can use pointers, end users
-   may **not** use pointers. End users must use the EntityHandle instead.
+#### Entity Handles
+
+EntityHandles are special code objects that the database uses to represent a
+specific entity.
+ * When the end user creates an entity they get an EntityHandle in return.
+ * EntityHandles can destroy their entity.
+ * EntityHandles can access data associated with their entity.
+ * EntityHandles are persistent. They are valid until the user destroys either
+   the underlying entity or the handle.
+ * EntityHandles should be easy to use. For this API: it is acceptable to trade
+   off poor computer performance for a more polished end-user experience.
+
+#### Entity Storage and Movement
  * Entities are stored in contiguous zero-indexed arrays, where each array
    contains all entities of their archetype.
- * Pointers are represented as indexes into the entity arrays. This is important
-   for using a structure-of-arrays memory layout. It also allows pointers to be
-   represented in 32 bits instead of 64 bits.
  * Holes are not allowed in the entity arrays. Therefore when the user deletes
    an entity from the middle of the list of entities, then a different entity
    is moved to fill in the hole and all pointers to the moved entity are
    updated to point to the new address.
-   + Moving the memory locations of entities is possible because the database
-     knows the memory location of every pointer.
+   + This is possible because the database knows the memory location of every
+     pointer and every EntityHandle.
    + This operation can be done efficiently if all entities are destroyed in
      batches, as opposed to one at a time. The algorithm to move entities reads
      and writes every pointer in the database exactly once, and can move any
@@ -181,14 +189,38 @@ Each component can be configured to check for common issues.
    + The alternative implementation is a dead/alive mask over the entity arrays.
       - The programmers to need to understand how to use the alive mask.
       - Linear memory usage.
+ * Entities can also be reordered for optimal data access patterns. This is
+   helpful when data access patterns span multiple archetypes.
+   + For example, ion channels have a pointer to the neuron segment where they
+     are inserted. The channels should be sorted by that pointers literal
+     value, because usually when you iterate through a list of ion channels
+     you're also going to want to access the data for the segments which they
+     are inserted into. When the entities are sorted by their pointers and you
+     iterate through the list of entities accessing each pointers' data, then
+     you are accessing all of the data in a single sorted sweep through the
+     underlying data.
+
+#### Pointers
+
+A pointer is a way to refer to an Entity.
+ * Pointers are for the programmers API. Programmers can use pointers, end users
+   may **not** use pointers. End users must use the EntityHandle instead.
+ * Pointers are represented as indexes into the entity arrays. This is important
+   for using a structure-of-arrays memory layout. It also allows pointers to be
+   represented in 32 bits instead of 64 bits.
+    - NULL is represented by the maximum value instead of zero, since zero is a
+      valid index.
  * Programmers may use pointers that are stored in the database, with the
-   limitation that you may not save the pointers. The database will provide a
-   way to make persistent EntityHandles out of the transient pointers.
+   limitation that pointers are only valid until the next time the database
+   gains control of program execution (at which time the database may decide to
+   move entities and update all pointers). The database will provide a way to
+   make persistent EntityHandles out of the transient pointers.
 
 #### Destroying Entities
- * Pointers to destroyed entities are invalid and must be either overwritten or
-   destroyed. Components containing pointer values can be configured to either
-   allow or disallow NULL pointers.
+
+Pointers to destroyed entities are invalid and must be either overwritten or
+destroyed. Components containing pointer values can be configured to either
+allow or disallow NULL pointers.
    + If NULL pointers are allowed then pointers to destroyed entities are
      replaced with NULL pointers.
    + If NULL pointers are disallowed then the entities that contain them are
@@ -197,6 +229,26 @@ Each component can be configured to check for common issues.
       - For example, this is useful for attaching ion-channels to a segment of a
         neurons membrane because then when you destroy the segment it
         automatically destroys all attached ion-channels.
+
+#### Sets of Entities
+
+Programmers will need persistent references to large numbers of entities.
+ * Using a large number of EntityHandles could be inefficient since each handle
+   is its own discrete python object.
+ * Creating a new archetype with a pointer attribute is cumbersome, visible
+   throughout the database, and it has different semantics than regular python
+   code.
+
+To meet this need: the database could implement efficient collection types for
+Entities.
+ * Set of entities must be of a single homogeneous Archetype.
+ * Backed by either Arrays or Hash-Sets.
+ * Applies operations to all contained elements.
+
+However, I would recommend deferring the design and implementation of this idea
+until after the rest of the database is implemented and programmers start
+trying to use it, at which point it will become more clear what faculties the
+database lacks regarding collections of entities.
 
 ### Documentation
 
