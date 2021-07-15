@@ -67,16 +67,13 @@ each user group.
 
 ### Two API's
 
-The programmers API allows access to the raw data.
+The programmers API allows access to the data arrays.
 
 The end users API presents an easy to use interface:
  * Python. It should use all of pythons built-in features:
     + Classes
     + Docstrings
     + Properties for setter/getter methods
-
-The database and its APIs will likely be restricted to live entirely inside of a
-single thread of python execution.
 
 ## Terminology
 
